@@ -1,0 +1,445 @@
+// BhashaGPT Pro - PostgreSQL Database Schema
+// Comprehensive schema for language learning platform
+
+generator client {
+  provider = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl"]
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ================================
+// USER MANAGEMENT
+// ================================
+
+model User {
+  id               String            @id @default(cuid())
+  email            String            @unique
+  password         String
+  name             String?
+  avatar           String?
+  subscriptionTier String            @default("FREE")
+  preferredLanguage String           @default("en")
+  timezone         String?
+  isEmailVerified  Boolean           @default(false)
+  emailVerifiedAt  DateTime?
+  lastLoginAt      DateTime?
+  isActive         Boolean           @default(true)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  // Relationships
+  sessions         Session[]
+  chatSessions     ChatSession[]
+  messages         Message[]
+  userProgress     UserProgress[]
+  subscriptions    Subscription[]
+  apiUsage         ApiUsage[]
+  refreshTokens    RefreshToken[]
+
+  // Indexes
+  @@index([email])
+  @@index([subscriptionTier])
+  @@index([createdAt])
+  @@index([isActive])
+  @@map("users")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  userId       String
+  sessionToken String   @unique
+  userAgent    String?
+  ipAddress    String?
+  location     String?
+  isActive     Boolean  @default(true)
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relationships
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Indexes
+  @@index([userId])
+  @@index([sessionToken])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  isRevoked Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  // Relationships
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Indexes
+  @@index([userId])
+  @@index([token])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+// ================================
+// CHAT SYSTEM
+// ================================
+
+model ChatSession {
+  id          String   @id @default(cuid())
+  userId      String
+  title       String?
+  language    String
+  learningLevel String        @default("INTERMEDIATE")
+  model       String   @default("gpt-4")
+  totalTokens Int      @default(0)
+  totalCost   Float    @default(0)
+  isArchived  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relationships
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages Message[]
+
+  // Indexes
+  @@index([userId])
+  @@index([language])
+  @@index([createdAt])
+  @@index([isArchived])
+  @@map("chat_sessions")
+}
+
+model Message {
+  id            String      @id @default(cuid())
+  sessionId     String
+  userId        String
+  role          String
+  content       String
+  translatedContent String?
+  isAi          Boolean     @default(false)
+  tokens        Int?
+  audioUrl      String?
+  audioLength   Int?        // in seconds
+  language      String?
+  confidence    Float?      // for speech recognition
+  timestamp     DateTime    @default(now())
+  createdAt     DateTime    @default(now())
+
+  // Relationships
+  session ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user    User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Indexes
+  @@index([sessionId])
+  @@index([userId])
+  @@index([role])
+  @@index([timestamp])
+  @@index([isAi])
+  @@map("messages")
+}
+
+// ================================
+// USER PROGRESS TRACKING
+// ================================
+
+model UserProgress {
+  id           String        @id @default(cuid())
+  userId       String
+  language     String
+  level        String        @default("BEGINNER")
+  streakDays   Int           @default(0)
+  totalLessons Int           @default(0)
+  totalMinutes Int           @default(0)
+  xpPoints     Int           @default(0)
+  lastStudyAt  DateTime?
+  achievements String?
+  weeklyGoal   Int           @default(5) // minutes per day
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  // Relationships
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Constraints
+  @@unique([userId, language])
+  
+  // Indexes
+  @@index([userId])
+  @@index([language])
+  @@index([level])
+  @@index([streakDays])
+  @@index([lastStudyAt])
+  @@map("user_progress")
+}
+
+// ================================
+// SUBSCRIPTION MANAGEMENT
+// ================================
+
+model Subscription {
+  id                     String             @id @default(cuid())
+  userId                 String
+  planType               String
+  status                 String
+  stripeCustomerId       String?            @unique
+  stripeSubscriptionId   String?            @unique
+  stripePriceId          String?
+  currentPeriodStart     DateTime?
+  currentPeriodEnd       DateTime?
+  cancelAtPeriodEnd      Boolean            @default(false)
+  canceledAt             DateTime?
+  trialStart             DateTime?
+  trialEnd               DateTime?
+  expiresAt              DateTime?
+  metadata               String?
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+
+  // Relationships
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  payments Payment[]
+  invoices Invoice[]
+
+  // Indexes
+  @@index([userId])
+  @@index([status])
+  @@index([planType])
+  @@index([stripeCustomerId])
+  @@index([stripeSubscriptionId])
+  @@index([expiresAt])
+  @@map("subscriptions")
+}
+
+model Payment {
+  id                   String       @id @default(cuid())
+  subscriptionId       String
+  stripePaymentId      String       @unique
+  stripeInvoiceId      String?
+  amount               Int          // Amount in cents
+  currency             String       @default("usd")
+  status               String
+  paymentMethod        String?
+  description          String?
+  receiptUrl           String?
+  refundedAmount       Int          @default(0)
+  isRefunded           Boolean      @default(false)
+  failureReason        String?
+  metadata             String?
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+
+  // Relationships
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  refunds      Refund[]
+
+  // Indexes
+  @@index([subscriptionId])
+  @@index([stripePaymentId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("payments")
+}
+
+model Invoice {
+  id                String       @id @default(cuid())
+  subscriptionId    String
+  stripeInvoiceId   String       @unique
+  invoiceNumber     String?
+  amount            Int          // Amount in cents
+  currency          String       @default("usd")
+  status            String
+  description       String?
+  invoiceUrl        String?
+  pdfUrl            String?
+  dueDate           DateTime?
+  paidAt            DateTime?
+  emailSent         Boolean      @default(false)
+  emailSentAt       DateTime?
+  metadata          String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  // Relationships
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  // Indexes
+  @@index([subscriptionId])
+  @@index([stripeInvoiceId])
+  @@index([status])
+  @@index([dueDate])
+  @@index([createdAt])
+  @@map("invoices")
+}
+
+model PaymentMethod {
+  id                String   @id @default(cuid())
+  userId            String
+  stripePaymentMethodId String @unique
+  type              String
+  brand             String?
+  last4             String?
+  expiryMonth       Int?
+  expiryYear        Int?
+  isDefault         Boolean  @default(false)
+  isActive          Boolean  @default(true)
+  metadata          String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Indexes
+  @@index([userId])
+  @@index([stripePaymentMethodId])
+  @@index([isDefault])
+  @@index([isActive])
+  @@map("payment_methods")
+}
+
+model Refund {
+  id              String   @id @default(cuid())
+  paymentId       String
+  stripeRefundId  String   @unique
+  amount          Int      // Amount in cents
+  currency        String   @default("usd")
+  reason          String?
+  status          String
+  receiptNumber   String?
+  metadata        String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relationships
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  // Indexes
+  @@index([paymentId])
+  @@index([stripeRefundId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("refunds")
+}
+
+model UsageLimit {
+  id            String   @id @default(cuid())
+  userId        String
+  planType      String
+  dailyMessages Int      @default(0)
+  monthlyTokens Int      @default(0)
+  resetDate     DateTime
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Constraints
+  @@unique([userId, resetDate])
+
+  // Indexes
+  @@index([userId])
+  @@index([planType])
+  @@index([resetDate])
+  @@map("usage_limits")
+}
+
+// ================================
+// API USAGE TRACKING
+// ================================
+
+model ApiUsage {
+  id           String      @id @default(cuid())
+  userId       String
+  date         DateTime
+  tokensUsed   Int         @default(0)
+  chatMessages Int         @default(0)
+  voiceMinutes Int         @default(0)
+  translations Int         @default(0)
+  apiCalls     Int         @default(0)
+  cost         Float       @default(0)
+  endpoint     String?
+  model        String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  // Relationships
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Constraints
+  @@unique([userId, date])
+  
+  // Indexes
+  @@index([userId])
+  @@index([date])
+  @@index([endpoint])
+  @@index([model])
+  @@map("api_usage")
+}
+
+// ================================
+// ADDITIONAL TRACKING TABLES
+// ================================
+
+model UserActivity {
+  id        String       @id @default(cuid())
+  userId    String
+  action    String
+  details   String?
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime     @default(now())
+
+  // Indexes
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("user_activities")
+}
+
+model Translation {
+  id             String   @id @default(cuid())
+  sourceText     String
+  translatedText String
+  sourceLanguage String
+  targetLanguage String
+  provider       String   @default("google")
+  confidence     Float?
+  cacheKey       String   @unique
+  hitCount       Int      @default(1)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // Indexes
+  @@index([cacheKey])
+  @@index([sourceLanguage, targetLanguage])
+  @@index([provider])
+  @@index([hitCount])
+  @@map("translations")
+}
+
+model SystemMetrics {
+  id        String   @id @default(cuid())
+  metric    String
+  value     Float
+  unit      String?
+  tags      String?
+  timestamp DateTime @default(now())
+
+  // Indexes
+  @@index([metric])
+  @@index([timestamp])
+  @@map("system_metrics")
+}
+
+// ================================
+// ENUMS (as constants for SQLite)
+// ================================
+
+// SubscriptionTier: "FREE", "PRO", "ENTERPRISE"
+// SubscriptionStatus: "ACTIVE", "CANCELED", "PAST_DUE", "UNPAID", "INCOMPLETE", "INCOMPLETE_EXPIRED", "TRIALING", "PAUSED"
+// MessageRole: "USER", "ASSISTANT", "SYSTEM"
+// LearningLevel: "BEGINNER", "INTERMEDIATE", "ADVANCED", "NATIVE"
+// ActivityType: "LOGIN", "LOGOUT", "CHAT_MESSAGE", "VOICE_MESSAGE", "TRANSLATION", "SUBSCRIPTION_CHANGE", "PROFILE_UPDATE", "PASSWORD_CHANGE", "EMAIL_VERIFICATION"
